@@ -125,7 +125,7 @@ export async function safeFetch(url: string): Promise<SafeFetchResult> {
       if (done) break;
       received += value.length;
 
-      if (received += MAX_BODY_BYTES) {
+      if (received > MAX_BODY_BYTES) {
         throw new SafeFetchError("Тело ответа превышает лимит размера", "too_large");
       }
 

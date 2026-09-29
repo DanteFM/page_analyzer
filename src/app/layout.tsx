@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
+import { App, ConfigProvider } from 'antd';
 
 export const metadata: Metadata = {
   title: "Page analyzer",
@@ -11,7 +12,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="ru">
       <body>
-        <AntdRegistry>{children}</AntdRegistry>
+        <AntdRegistry>
+          <ConfigProvider>
+            <App>{children}</App>
+          </ConfigProvider>
+        </AntdRegistry>
       </body>
     </html>
   );
