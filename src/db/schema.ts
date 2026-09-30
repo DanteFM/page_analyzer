@@ -40,6 +40,7 @@ export const checks = pgTable(
     error: text("error"),
     details: jsonb("details"), // произвольный JSON
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    ipAddress: text("ip_address"),
   },
   (table) => [
     // оптимизация, по аналогии с таблицей sites

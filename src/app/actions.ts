@@ -9,26 +9,29 @@ import { parseSeo } from "@/lib/parse-seo";
 import { getOwnerId } from "@/lib/get-owner-id";
 import { revalidatePath } from "next/cache";
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 
 export type CheckUrlResult = { success: true; siteId: string; checkId: string } 
   | { success: false; message: string };
 
-const MAX_CHECKS_PER_HOUR = 5;
+const MAX_CHECKS_PER_HOUR_PER_IP  = 5;
+const RECHECK_COOLDOWN_MS = 30 * 1000;
 
 export async function checkUrl(rawUrl: string): Promise<CheckUrlResult> {
   const ownerId = await getOwnerId();
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const ip = await getClientIp(); 
 
-  const [{ value: recentCount }] = await db
+
+  const [{ value: recentByIp  }] = await db
   .select({ value: count() })
   .from(checks)
-  .innerJoin(sites, eq(checks.siteId, sites.id))
-  .where(and(eq(sites.ownerId, ownerId), gte(checks.createdAt, hourAgo)));
+  .where(and(eq(checks.ipAddress, ip), gte(checks.createdAt, hourAgo)));
 
-  if (recentCount >= MAX_CHECKS_PER_HOUR) {
+  if (recentByIp >= MAX_CHECKS_PER_HOUR_PER_IP) {
     return {
       success: false,
-      message: "Превышен лимит проверок в час. Попробуй позже.",
+      message: "Превышен лимит проверок с этого адреса. Попробуй позже.",
     };
   }
 
@@ -47,6 +50,20 @@ export async function checkUrl(rawUrl: string): Promise<CheckUrlResult> {
   // берём сайт вручную, т.к. при конфликте может не вернуться
   const [site] = await db.select().from(sites).where(and(eq(sites.ownerId, ownerId), eq(sites.url, url)));
 
+  const [lastCheck] = await db
+    .select()
+    .from(checks)
+    .where(eq(checks.siteId, site.id))
+    .orderBy(desc(checks.createdAt))
+    .limit(1);
+
+  if (
+    lastCheck &&
+    Date.now() - new Date(lastCheck.createdAt).getTime() < RECHECK_COOLDOWN_MS
+  ) {
+    return { success: true, siteId: site.id, checkId: lastCheck.id };
+  }
+
   try {
     const { httpStatus, html, responseMs } = await safeFetch(url);
     const seo = parseSeo(html);
@@ -61,7 +78,8 @@ export async function checkUrl(rawUrl: string): Promise<CheckUrlResult> {
         title: seo.title,
         h1: seo.h1,
         description: seo.description,
-        details: { canonical: seo.canonical, robots: seo.robots }
+        details: { canonical: seo.canonical, robots: seo.robots },
+        ipAddress: ip
       })
       .returning();
 
@@ -76,6 +94,7 @@ export async function checkUrl(rawUrl: string): Promise<CheckUrlResult> {
         siteId: site.id,
         status: "failed",
         error: message,
+        ipAddress: ip
       })
       .returning();
     
@@ -97,7 +116,7 @@ export async function getSitesWithLastCheck() {
         .where(eq(checks.siteId, site.id))
         .orderBy(desc(checks.createdAt))
         .limit(1);
-      
+
       return { site, lastCheck: lastCheck ?? null };
     })
   );
@@ -125,4 +144,10 @@ export async function getSiteWithChecks(siteId: string) {
     .orderBy(desc(checks.createdAt))
 
   return { site, checks: siteChecks };
+}
+
+async function getClientIp(): Promise<string> {
+  const headerList = await headers();
+  const forwardedFor = headerList.get("x-forwarded-for");
+  return forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 }
